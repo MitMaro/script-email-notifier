@@ -1,0 +1,63 @@
+#!/usr/bin/env bash
+
+# Based on Cronic: http://habilis.net/cronic/
+
+set -euo pipefail
+IFS=$'\n\t'
+
+default_from="admin@$(hostname)"
+
+EMAILNOTIFY_SUBJECT="${EMAILNOTIFY_SUBJECT:-"Script Failed To Run"}"
+EMAILNOTIFY_FROM="${EMAILNOTIFY_FROM:-$default_from}"
+EMAILNOTIFY_SENDEMAIL="${EMAILNOTIFY_SENDEMAIL:-sendemail}"
+EMAILNOTIFY_SERVER="${EMAILNOTIFY_SERVER:-}"
+EMAILNOTIFY_TO="${EMAILNOTIFY_TO:-}"
+
+function validate_required() {
+	local validation_message="$1"
+	shift
+	local value="$1"
+	shift
+
+	if [[ -z "$value" ]]; then
+		>&2 echo "$validation_message"
+		exit 1
+	fi
+}
+
+
+validate_required "EMAILNOTIFY_SERVER missing or empty value" "$EMAILNOTIFY_SERVER"
+validate_required "EMAILNOTIFY_TO missing or empty value" "$EMAILNOTIFY_TO"
+
+tmp_dir="$(mktemp -d)"
+std_out="$tmp_dir/script.out"
+err_out="$tmp_dir/script.err"
+
+set +e
+"$@" >"$std_out" 2>"$err_out"
+exit_code=$?
+set -e
+
+if [[ "$exit_code" != "0" ]]; then
+	IFS= read -r -d '' mail_content <<-EOF || true
+		A script failed to complete
+
+		Script: $*
+		Exit Code: $exit_code
+
+		STDOUT
+		$(cat "$std_out")
+
+		STRERR
+		$(cat "$err_out")
+		EOF
+
+	"$EMAILNOTIFY_SENDEMAIL" \
+		-f "$EMAILNOTIFY_FROM" \
+		-t "$EMAILNOTIFY_TO" \
+		-u "$EMAILNOTIFY_SUBJECT" \
+		-m "$mail_content" \
+		-s "$EMAILNOTIFY_SERVER"
+fi
+
+rm -rf "$tmp_dir"
